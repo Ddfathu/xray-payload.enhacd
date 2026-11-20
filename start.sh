@@ -8,11 +8,13 @@ else
   echo "KEY_SALT=${NEW_SALT}" >> /etc/noobzvpns/.env
 fi
 
-# [ -f /etc/haproxy/haproxy.cfg ] && setsid haproxy -f /etc/haproxy/haproxy.cfg </dev/null >/dev/null 2>&1 &
 [ -f /etc/nginx/nginx.conf ] && nginx >/dev/null 2>&1 || true
 [ -f /etc/xray/config.json ] && setsid /usr/local/bin/xray run -config /etc/xray/config.json </dev/null >/var/log/xray.log 2>&1 &
 
 cd /etc/noobzvpns
-NODE_ENV=production /etc/noobzvpns/noobzvpns-api &
+NODE_ENV=production /etc/noobzvpns/noobzvpns-api 2>&1 | sed 's/^/[PANEL] /' &
+sleep 3
+echo "[CHECK] Listening ports:"
+ss -tlnp || netstat -tlnp || true
 
 exec /usr/local/bin/cloudflared tunnel --no-autoupdate run --token "$CF_TOKEN"
