@@ -2,7 +2,7 @@
 export GOGC=30
 export GOMEMLIMIT=85MiB
 
-# 1. Buat wrapper systemctl lengkap
+# 1. Buat wrapper systemctl anti-hang (lepas pipe dengan setsid)
 cat << 'SHIM' > /usr/bin/systemctl
 #!/bin/bash
 ACTION=""
@@ -24,25 +24,32 @@ done
 case "$ACTION" in
   daemon-reload|enable|disable|mask|unmask) exit 0 ;;
   is-active)
-    if pgrep -f "[/]${SVC}" >/dev/null 2>&1 || pgrep -x "${SVC}" >/dev/null 2>&1; then
+    if pgrep -f "[/]${SVC}" >/dev/null 2>&1 || pgrep -x "${SVC}" >/dev/null 2>&1 || pgrep -x "${SVC}d" >/dev/null 2>&1; then
       echo "active"; exit 0
     else
       echo "inactive"; exit 3
     fi ;;
   stop)
-    service "$SVC" stop >/dev/null 2>&1 || pkill -x "$SVC" >/dev/null 2>&1 || true
+    setsid bash -c "service '$SVC' stop; pkill -x '$SVC'; pkill -x '${SVC}d'" </dev/null >/dev/null 2>&1 || true
     exit 0 ;;
   start|restart|reload)
-    mkdir -p /run/haproxy
-    service "$SVC" "$ACTION" >/dev/null 2>&1 || service "$SVC" start >/dev/null 2>&1 || true
-    pgrep -f "[/]${SVC}" >/dev/null 2>&1 && exit 0
+    mkdir -p /run/haproxy /var/lib/vnstat
+    if [ "$SVC" = "vnstat" ]; then
+      setsid vnstatd -d </dev/null >/dev/null 2>&1 &
+      exit 0
+    fi
+    setsid bash -c "service '$SVC' '$ACTION' || service '$SVC' start" </dev/null >/dev/null 2>&1 &
+    for i in 1 2 3 4 5; do
+      pgrep -f "[/]${SVC}" >/dev/null 2>&1 && exit 0
+      sleep 0.3
+    done
     UNIT=$(find /etc/systemd/system /lib/systemd/system -name "${SVC}.service" 2>/dev/null | head -n 1)
     if [ -n "$UNIT" ]; then
       CMD=$(grep -E '^ExecStart=' "$UNIT" | head -n 1 | cut -d'=' -f2-)
       if [ -n "$CMD" ]; then
         BIN_NAME=$(basename "$(echo "$CMD" | awk '{print $1}')")
         pkill -x "$BIN_NAME" >/dev/null 2>&1 || true
-        setsid bash -c "$CMD" </dev/null >/var/log/${SVC}.log 2>&1 &
+        setsid bash -c "$CMD" </dev/null >/dev/null 2>&1 &
         sleep 1
       fi
     fi
@@ -65,11 +72,11 @@ EOF
 
 # 3. Nyalakan HAProxy sejak awal
 mkdir -p /run/haproxy
-service haproxy start >/dev/null 2>&1 || true
+setsid service haproxy start </dev/null >/dev/null 2>&1 &
 
 # 4. Jalankan Nginx dan Xray jika config sudah ada
 if [ -f /etc/xray/config.json ]; then
-    [ -f /etc/nginx/nginx.conf ] && service nginx start >/dev/null 2>&1 || true
+    [ -f /etc/nginx/nginx.conf ] && setsid service nginx start </dev/null >/dev/null 2>&1 &
     setsid /usr/local/bin/xray run -config /etc/xray/config.json </dev/null >/dev/null 2>&1 &
 fi
 
