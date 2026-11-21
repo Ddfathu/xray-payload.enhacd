@@ -69,15 +69,21 @@ case "$ACTION" in
   stop)
     setsid bash -c "service '$SVC' stop; pkill -x '$SVC'; pkill -x '${SVC}d'" </dev/null >/dev/null 2>&1 || true
     exit 0 ;;
-  start|restart|reload)
+  start|restart|reload|reload-or-restart|try-restart)
     mkdir -p /run/haproxy /var/lib/vnstat /var/log/nginx /run
     if [ "$SVC" = "vnstat" ]; then
       setsid vnstatd -d </dev/null >/dev/null 2>&1 &
       exit 0
     fi
+    if [ "$SVC" = "haproxy" ]; then
+      pkill -9 -x haproxy >/dev/null 2>&1 || true
+      /usr/sbin/haproxy -f /etc/haproxy/haproxy.cfg -D -p /run/haproxy.pid
+      sleep 0.5
+      exit 0
+    fi
     if [ "$SVC" = "nginx" ]; then
       grep -rl '\[::\]:' /etc/nginx/ 2>/dev/null | xargs -r sed -i '/\[::\]:/d'
-      pkill -x nginx >/dev/null 2>&1 || true
+      pkill -9 -x nginx >/dev/null 2>&1 || true
       while pgrep -x nginx >/dev/null 2>&1; do sleep 0.2; done
       /usr/sbin/nginx >/var/log/nginx/startup.log 2>&1 || true
       sleep 0.5
@@ -120,7 +126,11 @@ EOF
 
 # 3. Nyalakan HAProxy sejak awal
 mkdir -p /run/haproxy
-setsid service haproxy start </dev/null >/dev/null 2>&1 &
+if [ -f /etc/haproxy/haproxy.cfg ]; then
+    /usr/sbin/haproxy -f /etc/haproxy/haproxy.cfg -D -p /run/haproxy.pid
+else
+    setsid service haproxy start </dev/null >/dev/null 2>&1 &
+fi
 
 # 4. Jalankan Nginx, Xray, dan Cloudflared jika config sudah ada (saat restart)
 if [ -f /etc/xray/config.json ]; then
