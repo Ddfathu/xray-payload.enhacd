@@ -1,10 +1,9 @@
 FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Nilai bawaan biar tinggal deploy langsung jalan
 ENV PORT=3000
 ENV API_PASSWORD=noobzvpns
-ENV KEY_SALT=noobzvpns_default_salt_9a515c87caff6f3d
+ENV KEY_SALT=""
 ENV CF_TOKEN=""
 
 RUN apt-get update && apt-get install -y wget curl ca-certificates bash procps psmisc net-tools iproute2 libatomic1 openssl util-linux nginx \
