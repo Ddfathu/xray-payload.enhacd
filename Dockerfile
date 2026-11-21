@@ -6,8 +6,11 @@ ENV API_PASSWORD=noobzvpns
 ENV KEY_SALT=""
 ENV CF_TOKEN=""
 
-RUN apt-get update && apt-get install -y wget curl ca-certificates bash procps psmisc net-tools iproute2 libatomic1 openssl util-linux nginx \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    wget curl ca-certificates bash procps psmisc net-tools iproute2 \
+    libatomic1 openssl util-linux nginx haproxy certbot vnstat jq socat cron \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/haproxy
 
 RUN cat << 'SHIM' > /usr/bin/systemctl
 #!/bin/bash
@@ -40,9 +43,13 @@ case "$ACTION" in
     exit 0
     ;;
   start|restart|reload)
+    mkdir -p /run/haproxy
     if [ -x "/etc/init.d/$SVC" ]; then
       setsid bash -c "/etc/init.d/'$SVC' '$ACTION' || /etc/init.d/'$SVC' start" </dev/null >/dev/null 2>&1 &
-      exit 0
+      for i in 1 2 3 4 5 6 7 8; do
+        pgrep -f "[/]${SVC}" >/dev/null 2>&1 && exit 0
+        sleep 0.3
+      done
     fi
     UNIT=$(find /etc/systemd/system /lib/systemd/system -name "${SVC}.service" 2>/dev/null | head -n 1)
     if [ -n "$UNIT" ]; then
@@ -51,6 +58,10 @@ case "$ACTION" in
         BIN_NAME=$(basename "$(echo "$CMD" | awk '{print $1}')")
         pkill -x "$BIN_NAME" >/dev/null 2>&1 || true
         setsid bash -c "$CMD" </dev/null >/var/log/${SVC}.log 2>&1 &
+        for i in 1 2 3 4 5 6 7 8; do
+          pgrep -f "[/]${SVC}" >/dev/null 2>&1 && exit 0
+          sleep 0.3
+        done
       fi
     fi
     exit 0
