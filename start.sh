@@ -2,7 +2,7 @@
 export GOGC=30
 export GOMEMLIMIT=85MiB
 
-# 1. Buat wrapper systemctl anti-hang (lepas pipe dengan setsid)
+# 1. Buat wrapper systemctl anti-hang & kompatibel kontainer Railway
 cat << 'SHIM' > /usr/bin/systemctl
 #!/bin/bash
 ACTION=""
@@ -33,13 +33,20 @@ case "$ACTION" in
     setsid bash -c "service '$SVC' stop; pkill -x '$SVC'; pkill -x '${SVC}d'" </dev/null >/dev/null 2>&1 || true
     exit 0 ;;
   start|restart|reload)
-    mkdir -p /run/haproxy /var/lib/vnstat
+    mkdir -p /run/haproxy /var/lib/vnstat /var/log/nginx /run
     if [ "$SVC" = "vnstat" ]; then
       setsid vnstatd -d </dev/null >/dev/null 2>&1 &
       exit 0
     fi
+    if [ "$SVC" = "nginx" ]; then
+      grep -rl '\[::\]:' /etc/nginx/ 2>/dev/null | xargs -r sed -i '/\[::\]:/d'
+      pkill -x nginx >/dev/null 2>&1 || true
+      /usr/sbin/nginx >/var/log/nginx/startup.log 2>&1 || true
+      sleep 0.5
+      exit 0
+    fi
     setsid bash -c "service '$SVC' '$ACTION' || service '$SVC' start" </dev/null >/dev/null 2>&1 &
-    for i in 1 2 3 4 5; do
+    for i in 1 2 3 4 5 6; do
       pgrep -f "[/]${SVC}" >/dev/null 2>&1 && exit 0
       sleep 0.3
     done
@@ -76,7 +83,8 @@ setsid service haproxy start </dev/null >/dev/null 2>&1 &
 
 # 4. Jalankan Nginx dan Xray jika config sudah ada
 if [ -f /etc/xray/config.json ]; then
-    [ -f /etc/nginx/nginx.conf ] && setsid service nginx start </dev/null >/dev/null 2>&1 &
+    grep -rl '\[::\]:' /etc/nginx/ 2>/dev/null | xargs -r sed -i '/\[::\]:/d'
+    [ -f /etc/nginx/nginx.conf ] && /usr/sbin/nginx >/dev/null 2>&1 || true
     setsid /usr/local/bin/xray run -config /etc/xray/config.json </dev/null >/dev/null 2>&1 &
 fi
 
