@@ -2,12 +2,15 @@
 export GOGC=30
 export GOMEMLIMIT=85MiB
 
-# 1. Buat file .env otomatis dengan salt acak 64 karakter dan port 3000
-NEW_SALT=$(head -c 64 /dev/urandom | sha256sum | awk '{print $1}')
+# 1. Buat & export variabel autentikasi langsung ke sistem + file .env
+export PORT=3000
+export API_PASSWORD="${API_PASSWORD:-noobzvpns}"
+export KEY_SALT="${KEY_SALT:-$(head -c 64 /dev/urandom | sha256sum | awk '{print $1}')}"
+
 cat << EOF > /etc/noobzvpns/.env
-PORT=3000
-API_PASSWORD=${API_PASSWORD:-noobzvpns}
-KEY_SALT=${KEY_SALT:-$NEW_SALT}
+PORT=$PORT
+API_PASSWORD=$API_PASSWORD
+KEY_SALT=$KEY_SALT
 EOF
 
 # 2. Jalankan HAProxy, Nginx, dan Xray jika konfigurasinya sudah ada
@@ -17,9 +20,9 @@ if [ -f /etc/xray/config.json ]; then
     setsid /usr/local/bin/xray run -config /etc/xray/config.json </dev/null >/dev/null 2>&1 &
 fi
 
-# 3. Jalankan panel NoobzVPN di Port 3000
+# 3. Jalankan panel NoobzVPN dengan variabel yang sudah ter-export
 cd /etc/noobzvpns
-PORT=3000 NODE_ENV=production /etc/noobzvpns/noobzvpns-api > /var/log/noobzvpns.log 2>&1 &
+NODE_ENV=production /etc/noobzvpns/noobzvpns-api > /var/log/noobzvpns.log 2>&1 &
 
 # 4. Jalankan Cloudflare Tunnel jika CF_TOKEN diisi
 if [ -n "$CF_TOKEN" ]; then
