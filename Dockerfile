@@ -1,92 +1,36 @@
-FROM ubuntu:22.04
-ENV DEBIAN_FRONTEND=noninteractive
-
-ENV PORT=3000
-ENV API_PASSWORD=noobzvpns
-ENV KEY_SALT=""
-ENV CF_TOKEN=""
-
-RUN apt-get update && apt-get install -y \
-    wget curl ca-certificates bash procps psmisc net-tools iproute2 \
-    libatomic1 openssl util-linux nginx haproxy certbot vnstat jq socat cron \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /run/haproxy
-
-RUN cat << 'SHIM' > /usr/bin/systemctl
 #!/bin/bash
 export GOGC=30
 export GOMEMLIMIT=85MiB
-ACTION=""
-SVC=""
-NOW=0
-for arg in "$@"; do
-  case "$arg" in
-    --now) NOW=1 ;;
-    -*) ;;
-    *)
-      if [ -z "$ACTION" ]; then
-        ACTION="$arg"
-      elif [ -z "$SVC" ]; then
-        SVC="${arg%.service}"
-      fi
-      ;;
-  esac
-done
 
-[ "$ACTION" = "enable" ] && [ "$NOW" -eq 1 ] && ACTION="start"
+# 1. Buat & export variabel autentikasi langsung ke sistem + file .env
+export PORT=3000
+export API_PASSWORD="${API_PASSWORD:-noobzvpns}"
+export KEY_SALT="${KEY_SALT:-$(head -c 64 /dev/urandom | sha256sum | awk '{print $1}')}"
 
-case "$ACTION" in
-  daemon-reload|enable|disable|mask|unmask)
-    exit 0
-    ;;
-  is-active)
-    if pgrep -f "[/]${SVC}" >/dev/null 2>&1 || pgrep -x "${SVC}" >/dev/null 2>&1; then
-      echo "active"
-      exit 0
-    else
-      echo "inactive"
-      exit 3
-    fi
-    ;;
-  stop)
-    setsid bash -c "[ -x '/etc/init.d/$SVC' ] && /etc/init.d/'$SVC' stop; pkill -x '$SVC'" </dev/null >/dev/null 2>&1 || true
-    exit 0
-    ;;
-  start|restart|reload)
-    mkdir -p /run/haproxy
-    if [ -x "/etc/init.d/$SVC" ]; then
-      /etc/init.d/"$SVC" "$ACTION" >/dev/null 2>&1 || /etc/init.d/"$SVC" start >/dev/null 2>&1 || true
-      pgrep -f "[/]${SVC}" >/dev/null 2>&1 && exit 0
-    fi
-    UNIT=$(find /etc/systemd/system /lib/systemd/system -name "${SVC}.service" 2>/dev/null | head -n 1)
-    if [ -n "$UNIT" ]; then
-      CMD=$(grep -E '^ExecStart=' "$UNIT" | head -n 1 | cut -d'=' -f2-)
-      if [ -n "$CMD" ]; then
-        BIN_NAME=$(basename "$(echo "$CMD" | awk '{print $1}')")
-        pkill -x "$BIN_NAME" >/dev/null 2>&1 || true
-        setsid bash -c "$CMD" </dev/null >/var/log/${SVC}.log 2>&1 &
-        for i in 1 2 3 4 5; do
-          pgrep -f "[/]${SVC}" >/dev/null 2>&1 && exit 0
-          sleep 0.3
-        done
-      fi
-    fi
-    exit 0
-    ;;
-esac
-exit 0
-SHIM
-RUN chmod +x /usr/bin/systemctl
+cat << EOF > /etc/noobzvpns/.env
+PORT=$PORT
+API_PASSWORD=$API_PASSWORD
+KEY_SALT=$KEY_SALT
+EOF
 
-RUN curl -L -o /usr/local/bin/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-    && chmod +x /usr/local/bin/cloudflared \
-    && ln -sf /usr/local/bin/cloudflared /usr/bin/cloudflared
+# 2. Nyalakan HAProxy dari awal agar lolos cek bootstrap panel (config bawaan tidak pakai port 80/443)
+mkdir -p /run/haproxy
+service haproxy start >/dev/null 2>&1 || true
 
-RUN mkdir -p /etc/noobzvpns \
-    && curl -fsSL "https://drive.usercontent.google.com/download?id=1gShx9t7V1DJs21Vmt7Ge8PFhpsPJqsZe&confirm=t" -o /etc/noobzvpns/noobzvpns-api \
-    && chmod +x /etc/noobzvpns/noobzvpns-api
+# 3. Jalankan Nginx dan Xray jika konfigurasinya sudah terpasang
+if [ -f /etc/xray/config.json ]; then
+    [ -f /etc/nginx/nginx.conf ] && service nginx start >/dev/null 2>&1 || true
+    setsid /usr/local/bin/xray run -config /etc/xray/config.json </dev/null >/dev/null 2>&1 &
+fi
 
-WORKDIR /app
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
-CMD ["/app/start.sh"]
+# 4. Jalankan panel NoobzVPN dengan variabel yang sudah ter-export
+cd /etc/noobzvpns
+NODE_ENV=production /etc/noobzvpns/noobzvpns-api > /var/log/noobzvpns.log 2>&1 &
+
+# 5. Jalankan Cloudflare Tunnel jika CF_TOKEN diisi
+if [ -n "$CF_TOKEN" ]; then
+    exec /usr/local/bin/cloudflared tunnel --no-autoupdate run --token "$CF_TOKEN"
+else
+    echo "Info: CF_TOKEN belum diisi, Cloudflare Tunnel dilewati."
+    tail -f /dev/null
+fi
