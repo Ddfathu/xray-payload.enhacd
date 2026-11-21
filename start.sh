@@ -2,19 +2,20 @@
 export GOGC=30
 export GOMEMLIMIT=85MiB
 
-# 1. Buat wrapper systemctl lengkap (support --now, is-active, show, dan anti-hang)
+# 1. Buat wrapper systemctl lengkap
 cat << 'SHIM' > /usr/bin/systemctl
 #!/bin/bash
 ACTION=""
 SVC=""
 NOW=0
 VALUE_ONLY=0
+PROP=""
 for arg in "$@"; do
   case "$arg" in
     --now) NOW=1 ;;
     --value) VALUE_ONLY=1 ;;
     -p|--property) ;;
-    ActiveState|SubState|LoadState) ;;
+    ActiveState|SubState|LoadState|UnitFileState) PROP="$arg" ;;
     -*) ;;
     *)
       if [ -z "$ACTION" ]; then ACTION="$arg"
@@ -36,9 +37,33 @@ case "$ACTION" in
     else echo "inactive"; exit 3; fi ;;
   show)
     if is_running "$SVC"; then
-      [ "$VALUE_ONLY" -eq 1 ] && echo "active" || echo "ActiveState=active"
+      if [ "$VALUE_ONLY" -eq 1 ]; then
+        case "$PROP" in
+          SubState) echo "running" ;;
+          LoadState) echo "loaded" ;;
+          UnitFileState) echo "enabled" ;;
+          *) echo "active" ;;
+        esac
+      else
+        echo "ActiveState=active"
+        echo "SubState=running"
+        echo "LoadState=loaded"
+        echo "UnitFileState=enabled"
+      fi
     else
-      [ "$VALUE_ONLY" -eq 1 ] && echo "inactive" || echo "ActiveState=inactive"
+      if [ "$VALUE_ONLY" -eq 1 ]; then
+        case "$PROP" in
+          SubState) echo "dead" ;;
+          LoadState) echo "loaded" ;;
+          UnitFileState) echo "enabled" ;;
+          *) echo "inactive" ;;
+        esac
+      else
+        echo "ActiveState=inactive"
+        echo "SubState=dead"
+        echo "LoadState=loaded"
+        echo "UnitFileState=enabled"
+      fi
     fi
     exit 0 ;;
   stop)
