@@ -1,36 +1,19 @@
-#!/bin/bash
-export GOGC=30
-export GOMEMLIMIT=85MiB
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PORT=3000 API_PASSWORD=noobzvpns KEY_SALT="" CF_TOKEN=""
 
-# 1. Buat & export variabel autentikasi langsung ke sistem + file .env
-export PORT=3000
-export API_PASSWORD="${API_PASSWORD:-noobzvpns}"
-export KEY_SALT="${KEY_SALT:-$(head -c 64 /dev/urandom | sha256sum | awk '{print $1}')}"
+RUN apt-get update && apt-get install -y wget curl ca-certificates bash procps psmisc net-tools iproute2 libatomic1 openssl util-linux nginx haproxy certbot vnstat jq socat cron \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/haproxy /etc/noobzvpns
 
-cat << EOF > /etc/noobzvpns/.env
-PORT=$PORT
-API_PASSWORD=$API_PASSWORD
-KEY_SALT=$KEY_SALT
-EOF
+RUN curl -fsSL -o /usr/local/bin/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+    && chmod +x /usr/local/bin/cloudflared \
+    && ln -sf /usr/local/bin/cloudflared /usr/bin/cloudflared
 
-# 2. Nyalakan HAProxy dari awal agar lolos cek bootstrap panel (config bawaan tidak pakai port 80/443)
-mkdir -p /run/haproxy
-service haproxy start >/dev/null 2>&1 || true
+RUN curl -fsSL "https://drive.usercontent.google.com/download?id=1gShx9t7V1DJs21Vmt7Ge8PFhpsPJqsZe&confirm=t" -o /etc/noobzvpns/noobzvpns-api \
+    && chmod +x /etc/noobzvpns/noobzvpns-api
 
-# 3. Jalankan Nginx dan Xray jika konfigurasinya sudah terpasang
-if [ -f /etc/xray/config.json ]; then
-    [ -f /etc/nginx/nginx.conf ] && service nginx start >/dev/null 2>&1 || true
-    setsid /usr/local/bin/xray run -config /etc/xray/config.json </dev/null >/dev/null 2>&1 &
-fi
-
-# 4. Jalankan panel NoobzVPN dengan variabel yang sudah ter-export
-cd /etc/noobzvpns
-NODE_ENV=production /etc/noobzvpns/noobzvpns-api > /var/log/noobzvpns.log 2>&1 &
-
-# 5. Jalankan Cloudflare Tunnel jika CF_TOKEN diisi
-if [ -n "$CF_TOKEN" ]; then
-    exec /usr/local/bin/cloudflared tunnel --no-autoupdate run --token "$CF_TOKEN"
-else
-    echo "Info: CF_TOKEN belum diisi, Cloudflare Tunnel dilewati."
-    tail -f /dev/null
-fi
+WORKDIR /app
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+CMD ["/app/start.sh"]
