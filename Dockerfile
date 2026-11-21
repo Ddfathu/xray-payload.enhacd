@@ -1,5 +1,12 @@
 FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
+
+# Nilai bawaan biar tinggal deploy langsung jalan
+ENV PORT=3000
+ENV API_PASSWORD=noobzvpns
+ENV KEY_SALT=noobzvpns_default_salt_9a515c87caff6f3d
+ENV CF_TOKEN=""
+
 RUN apt-get update && apt-get install -y wget curl ca-certificates bash procps psmisc net-tools iproute2 libatomic1 openssl util-linux nginx \
     && rm -rf /var/lib/apt/lists/*
 
@@ -59,11 +66,9 @@ RUN curl -L -o /usr/local/bin/cloudflared https://github.com/cloudflare/cloudfla
 
 RUN mkdir -p /etc/noobzvpns \
     && curl -fsSL "https://drive.usercontent.google.com/download?id=1gShx9t7V1DJs21Vmt7Ge8PFhpsPJqsZe&confirm=t" -o /etc/noobzvpns/noobzvpns-api \
-    && curl -fsSL "https://drive.usercontent.google.com/download?id=19-UeoT1G7vu5cpg1doVaGwbdKdPWXqhh&confirm=t" -o /etc/noobzvpns/.env \
     && chmod +x /etc/noobzvpns/noobzvpns-api
 
 WORKDIR /app
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 CMD ["/app/start.sh"]
-
